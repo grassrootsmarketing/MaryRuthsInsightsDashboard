@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MaryRuth Organics - Performance Dashboard</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 :root{--r:#ED1C24;--rd:#C41920;--rl:rgba(237,28,36,.08);--bg:#0F1117;--sf:#1A1D27;--sfh:#22252F;--bd:#2A2D38;--tx:#E8E9ED;--td:#8B8E9A;--tm:#5C5F6E;--g:#22C55E;--a:#F59E0B;--b:#3B82F6;--rad:12px}
 *{margin:0;padding:0;box-sizing:border-box}
@@ -18,6 +19,11 @@ body{font-family:'DM Sans',-apple-system,sans-serif;background:var(--bg);color:v
 .header-title{color:#fff;border-left:2px solid rgba(255,255,255,.3);padding-left:20px}
 .header-title h1{font-size:18px;font-weight:600}
 .header-title p{font-size:12px;opacity:.8;margin-top:2px}
+.upload-btn{display:flex;align-items:center;gap:6px;padding:8px 16px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:8px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;transition:all .2s;font-family:inherit}
+.upload-btn:hover{background:rgba(255,255,255,.25);border-color:rgba(255,255,255,.5)}
+.upload-btn svg{width:16px;height:16px}
+.upload-banner{background:linear-gradient(135deg,#22C55E,#16A34A);color:#fff;padding:10px 20px;text-align:center;font-size:13px;font-weight:600;display:none;letter-spacing:.3px}
+.upload-banner.show{display:block}
 .header-updated{color:#fff;font-size:12px;opacity:.8}
 
 .container{max-width:1400px;margin:0 auto;padding:24px}
@@ -137,8 +143,16 @@ body{font-family:'DM Sans',-apple-system,sans-serif;background:var(--bg);color:v
       <p>Grassroots Marketing Analytics (MRO Only)</p>
     </div>
   </div>
-  <div class="header-updated">Last Updated: <span id="lastUpdate"></span></div>
+  <div style="display:flex;align-items:center;gap:12px">
+    <label class="upload-btn" for="xlUpload">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      Upload New Data
+    </label>
+    <input type="file" id="xlUpload" accept=".xlsx,.xls" style="display:none" onchange="handleUpload(this)">
+    <div class="header-updated">Last Updated: <span id="lastUpdate"></span></div>
+  </div>
 </div>
+<div id="uploadBanner" class="upload-banner"></div>
 
 <div class="container">
   <!-- YEAR TABS -->
@@ -1449,6 +1463,223 @@ function formatReply(s){
   s=s.replace(/\n/g,'<br>');
   return s;
 }
+
+// ============================================================
+// EXCEL UPLOAD & LIVE UPDATE
+// ============================================================
+function handleUpload(input){
+  const file=input.files[0];
+  if(!file)return;
+  const reader=new FileReader();
+  reader.onload=function(e){
+    try{
+      const wb=XLSX.read(e.target.result,{type:'array',cellDates:true});
+      const rawSheet=wb.Sheets['Raw'];
+      if(!rawSheet){alert('No "Raw" sheet found. Please upload the analytics report.');return;}
+      const rawData=XLSX.utils.sheet_to_json(rawSheet);
+      processUpload(rawData,file.name);
+    }catch(err){
+      alert('Error reading file: '+err.message);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+  input.value='';
+}
+
+function chainOf(v){
+  v=(v||'').toLowerCase();
+  if(v.includes('whole foods')||v.includes('wfm'))return'Whole Foods';
+  if(v.includes('sprout'))return'Sprouts';
+  if(v.includes('central market'))return'Central Market';
+  if(v.includes('erewhon'))return'Erewhon';
+  return'Independents';
+}
+
+function regionOf(st){
+  const m={CA:'West',OR:'West',WA:'West',NV:'West',AZ:'Southwest',NM:'Southwest',CO:'Southwest',TX:'Central',IL:'Central',FL:'Southeast',GA:'Southeast',TN:'Southeast',NY:'Atlantic',NJ:'Atlantic',PA:'Atlantic',MD:'Atlantic',MA:'Atlantic'};
+  return m[st]||'Other';
+}
+
+function processUpload(rawData,filename){
+  const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const monthly={};const chainMonthly={};const byState={};const byChain={};const byRegion={};const ulocs={};
+  const chains=['Whole Foods','Sprouts','Central Market','Erewhon','Independents'];
+  
+  rawData.forEach(row=>{
+    const d=row['DATE'];if(!d)return;
+    const date=new Date(d);
+    const mo=months[date.getMonth()];
+    const v=row['VENUE NAME']||'';
+    const st=row['STATE']||'';
+    const units=parseInt(row['# TOTAL SALES'])||0;
+    const rev=parseFloat(row['$ TOTAL SALES'])||0;
+    const sampled=parseInt(row['How many customers sampled to in total?'])||0;
+    const c=chainOf(v);
+    
+    if(!monthly[mo])monthly[mo]={ev:0,sa:0,un:0,sh:0};
+    monthly[mo].ev++;monthly[mo].sa+=rev;monthly[mo].un+=units;monthly[mo].sh+=sampled;
+    
+    if(!chainMonthly[c])chainMonthly[c]={};
+    if(!chainMonthly[c][mo])chainMonthly[c][mo]=0;
+    chainMonthly[c][mo]++;
+    
+    if(!byState[st])byState[st]={ev:0,rev:0};
+    byState[st].ev++;byState[st].rev+=rev;
+    
+    if(!byChain[c])byChain[c]={ev:0,rev:0};
+    byChain[c].ev++;byChain[c].rev+=rev;
+    
+    const rg=regionOf(st);
+    if(!byRegion[rg])byRegion[rg]=0;
+    byRegion[rg]++;
+    
+    if(!ulocs[mo])ulocs[mo]={};
+    if(!ulocs[mo][c])ulocs[mo][c]=new Set();
+    ulocs[mo][c].add(v);
+  });
+  
+  const activeMonths=months.filter(m=>monthly[m]);
+  const totalEv=activeMonths.reduce((s,m)=>s+monthly[m].ev,0);
+  const totalRev=activeMonths.reduce((s,m)=>s+monthly[m].sa,0);
+  const totalUn=activeMonths.reduce((s,m)=>s+monthly[m].un,0);
+  const totalSh=activeMonths.reduce((s,m)=>s+monthly[m].sh,0);
+  const netUn=Math.round(totalUn*0.87);
+  const netRev=Math.round(totalRev*0.87);
+  const conv=totalSh>0?((netUn/totalSh)*100).toFixed(1):0;
+  const upe=(totalUn/totalEv).toFixed(2);
+  const nupe=(netUn/totalEv).toFixed(2);
+  const avgShop=(totalSh/totalEv).toFixed(2);
+  
+  // Update 2026 KPIs with animation
+  const kpiPanel=document.getElementById('y26');
+  if(kpiPanel){
+    const kpis=kpiPanel.querySelectorAll('.kpi-val');
+    const newVals=[
+      totalEv.toLocaleString(),
+      totalUn.toLocaleString(),
+      netUn.toLocaleString(),
+      '$'+totalRev.toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:0}),
+      '$'+netRev.toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:0}),
+      totalSh.toLocaleString(),
+      avgShop,
+      conv+'%',
+      upe,
+      nupe
+    ];
+    kpis.forEach((el,i)=>{
+      if(i<newVals.length)animateKPI(el,newVals[i]);
+    });
+  }
+  
+  // Update 2026 charts
+  const evArr=activeMonths.map(m=>monthly[m].ev);
+  const saArr=activeMonths.map(m=>monthly[m].sa);
+  const unArr=activeMonths.map(m=>monthly[m].un);
+  const shArr=activeMonths.map(m=>monthly[m].sh);
+  const avgArr=saArr.map((s,i)=>+(s/evArr[i]).toFixed(2));
+  const netUnArr=unArr.map(u=>Math.round(u*0.87));
+  
+  // Destroy and recreate 2026 charts
+  Chart.helpers.each(Chart.instances,(c)=>{
+    const canvasId=c.canvas?.id||'';
+    if(canvasId.startsWith('c26_')){
+      const datasets=[];
+      if(canvasId==='c26_evChain'){
+        chains.forEach(ch=>{
+          datasets.push({label:ch,data:activeMonths.map(m=>(chainMonthly[ch]&&chainMonthly[ch][m])||0),backgroundColor:CC[ch],borderRadius:3,barPercentage:.7});
+        });
+        c.data.labels=activeMonths;
+        c.data.datasets=datasets;
+      }else if(canvasId==='c26_avgD'){
+        c.data.labels=activeMonths;
+        c.data.datasets=[lc('Avg $/Demo',avgArr,'#ED1C24')];
+      }else if(canvasId==='c26_units'){
+        c.data.labels=activeMonths;
+        c.data.datasets=[lc('Gross Units',unArr,'#3B82F6')];
+      }else if(canvasId==='c26_netUnits'){
+        c.data.labels=activeMonths;
+        c.data.datasets=[lc('Net Units',netUnArr,'#8B5CF6')];
+      }else if(canvasId==='c26_shop'){
+        c.data.labels=activeMonths;
+        c.data.datasets=[lc('Shoppers',shArr,'#F59E0B')];
+      }else if(canvasId==='c26_chainRev'){
+        const chData=chains.map(ch=>({name:ch,...(byChain[ch]||{ev:0,rev:0})})).filter(x=>x.ev>0).sort((a,b)=>b.rev-a.rev);
+        c.data.labels=chData.map(x=>x.name);
+        c.data.datasets=[{data:chData.map(x=>x.rev),backgroundColor:chData.map(x=>CC[x.name]),borderWidth:0,hoverOffset:8}];
+      }else if(canvasId==='c26_uloc'){
+        const ds=chains.map(ch=>({label:ch,data:activeMonths.map(m=>(ulocs[m]&&ulocs[m][ch])?ulocs[m][ch].size:0),backgroundColor:CC[ch],borderRadius:3,barPercentage:.7}));
+        c.data.labels=activeMonths;
+        c.data.datasets=ds;
+      }else if(canvasId==='c26_eng'){
+        c.data.labels=activeMonths;
+        c.data.datasets=[
+          {label:'Customer Engagements',data:shArr,backgroundColor:'#F59E0B40',borderColor:'#F59E0B',borderWidth:2,borderRadius:3,barPercentage:.6,yAxisID:'y'},
+          {label:'Events',data:evArr,type:'line',borderColor:'#22C55E',backgroundColor:'#22C55E20',pointBackgroundColor:'#22C55E',borderWidth:2.5,pointRadius:4,tension:.4,yAxisID:'y1'}
+        ];
+      }else if(canvasId==='c26_regD'){
+        const rgColors={'West':'#ED1C24','Central':'#F97316','Southeast':'#FACC15','Southwest':'#22C55E','Atlantic':'#3B82F6'};
+        const rgData=Object.entries(byRegion).sort((a,b)=>b[1]-a[1]);
+        c.data.labels=rgData.map(x=>x[0]);
+        c.data.datasets=[{data:rgData.map(x=>x[1]),backgroundColor:rgData.map(x=>rgColors[x[0]]||'#666'),borderWidth:0,hoverOffset:8}];
+      }else if(canvasId==='c26_topSt'){
+        const stData=Object.entries(byState).filter(x=>x[0]).map(([s,d])=>({s,e:d.ev,r:d.rev})).sort((a,b)=>b.e-a.e);
+        c.data.labels=stData.map(x=>x.s);
+        c.data.datasets=[{data:stData.map(x=>x.e),backgroundColor:stData.map((_,i)=>i<3?'#ED1C24':i<7?'#F97316':'#3B82F6'),borderRadius:4,barPercentage:.7}];
+      }
+      c.update('active');
+    }
+  });
+  
+  // Update chain bars and tables
+  const chArr=chains.map(ch=>({name:ch,...(byChain[ch]||{ev:0,rev:0})})).filter(x=>x.ev>0).sort((a,b)=>b.rev-a.rev);
+  buildBars('bars26',chArr,totalEv);
+  buildChainTable('ctb26',chArr,totalEv);
+  
+  const stArr=Object.entries(byState).filter(x=>x[0]).map(([s,d])=>({s,e:d.ev,r:d.rev})).sort((a,b)=>b.e-a.e);
+  buildStateTable('stb26',stArr,totalEv);
+  
+  // Show banner
+  const banner=document.getElementById('uploadBanner');
+  banner.textContent='\u2705 Data updated from '+filename+' \u2014 '+totalEv+' events, $'+Math.round(totalRev).toLocaleString()+' revenue ('+activeMonths.join(', ')+')';
+  banner.classList.add('show');
+  setTimeout(()=>banner.classList.remove('show'),8000);
+  
+  // Switch to 2026 tab
+  switchYear('y26');
+}
+
+function animateKPI(el,newVal){
+  const raw=el.textContent.trim();
+  const hasPrefix=newVal.startsWith('$');
+  const hasSuffix=newVal.endsWith('%');
+  const cleanOld=parseFloat(raw.replace(/[$,%,]/g,''))||0;
+  const cleanNew=parseFloat(newVal.replace(/[$,%,]/g,''))||0;
+  if(cleanOld===cleanNew){el.textContent=newVal;return;}
+  
+  const isDecimal=newVal.replace(/[$,%]/g,'').includes('.');
+  const decimals=isDecimal?(newVal.replace(/[$,%]/g,'').split('.')[1]||'').length:0;
+  const duration=1000;
+  const start=performance.now();
+  
+  // Flash color
+  const origColor=el.style.color;
+  el.style.color=cleanNew>cleanOld?'#22C55E':'#ED1C24';
+  setTimeout(()=>{el.style.color=origColor;},1200);
+  
+  function tick(now){
+    const elapsed=now-start;
+    const progress=Math.min(elapsed/duration,1);
+    const eased=1-Math.pow(1-progress,3);
+    const current=cleanOld+(cleanNew-cleanOld)*eased;
+    let formatted;
+    if(isDecimal){formatted=current.toFixed(decimals);}
+    else{formatted=Math.round(current).toLocaleString();}
+    el.textContent=(hasPrefix?'$':'')+formatted+(hasSuffix?'%':'');
+    if(progress<1)requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
 </script>
 </body>
 </html>
