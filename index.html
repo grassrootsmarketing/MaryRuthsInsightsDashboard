@@ -1564,16 +1564,16 @@ function processUpload(rawData,filename){
   if(kpiPanel){
     const kpis=kpiPanel.querySelectorAll('.kpi-val');
     const newVals=[
-      totalEv.toLocaleString(),
-      totalUn.toLocaleString(),
-      netUn.toLocaleString(),
-      '$'+totalRev.toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:0}),
-      '$'+netRev.toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:0}),
-      totalSh.toLocaleString(),
-      avgShop,
-      conv+'%',
-      upe,
-      nupe
+      (totalEv||0).toLocaleString(),
+      (totalUn||0).toLocaleString(),
+      (netUn||0).toLocaleString(),
+      '$'+(totalRev||0).toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:0}),
+      '$'+(netRev||0).toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:0}),
+      (totalSh||0).toLocaleString(),
+      avgShop||'0',
+      (conv||'0')+'%',
+      upe||'0',
+      nupe||'0'
     ];
     kpis.forEach((el,i)=>{
       if(i<newVals.length)animateKPI(el,newVals[i]);
@@ -1585,15 +1585,19 @@ function processUpload(rawData,filename){
   const saArr=activeMonths.map(m=>monthly[m].sa);
   const unArr=activeMonths.map(m=>monthly[m].un);
   const shArr=activeMonths.map(m=>monthly[m].sh);
-  const avgArr=saArr.map((s,i)=>+(s/evArr[i]).toFixed(2));
+  const avgArr=saArr.map((s,i)=>evArr[i]?+(s/evArr[i]).toFixed(2):0);
   const netUnArr=unArr.map(u=>Math.round(u*0.87));
   
-  // Destroy and recreate 2026 charts
-  Chart.helpers.each(Chart.instances,(c)=>{
-    const canvasId=c.canvas?.id||'';
-    if(canvasId.startsWith('c26_')){
-      const datasets=[];
+  // Update 2026 charts safely
+  const chartIds=['c26_evChain','c26_avgD','c26_units','c26_netUnits','c26_shop','c26_chainRev','c26_uloc','c26_eng','c26_regD','c26_topSt'];
+  chartIds.forEach(canvasId=>{
+    const canvas=document.getElementById(canvasId);
+    if(!canvas)return;
+    const c=Chart.getChart(canvas);
+    if(!c)return;
+    try{
       if(canvasId==='c26_evChain'){
+        const datasets=[];
         chains.forEach(ch=>{
           datasets.push({label:ch,data:activeMonths.map(m=>(chainMonthly[ch]&&chainMonthly[ch][m])||0),backgroundColor:CC[ch],borderRadius:3,barPercentage:.7});
         });
@@ -1636,11 +1640,11 @@ function processUpload(rawData,filename){
         c.data.datasets=[{data:stData.map(x=>x.e),backgroundColor:stData.map((_,i)=>i<3?'#ED1C24':i<7?'#F97316':'#3B82F6'),borderRadius:4,barPercentage:.7}];
       }
       c.update('active');
-    }
+    }catch(err){console.error('Chart update error for '+canvasId+':',err);}
   });
   
   // Update chain bars and tables
-  const chArr=chains.map(ch=>({name:ch,...(byChain[ch]||{ev:0,rev:0})})).filter(x=>x.ev>0).sort((a,b)=>b.rev-a.rev);
+  const chArr=chains.map(ch=>{const d=byChain[ch]||{ev:0,rev:0};return{name:ch,events:d.ev,revenue:d.rev};}).filter(x=>x.events>0).sort((a,b)=>b.revenue-a.revenue);
   buildBars('bars26',chArr,totalEv);
   buildChainTable('ctb26',chArr,totalEv);
   
