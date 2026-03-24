@@ -1477,7 +1477,8 @@ function handleUpload(input){
       const rawSheet=wb.Sheets['Raw'];
       if(!rawSheet){alert('No "Raw" sheet found. Please upload the analytics report.');return;}
       const rawData=XLSX.utils.sheet_to_json(rawSheet);
-      processUpload(rawData,file.name);
+      if(rawData.length===0){alert('No data rows found in Raw sheet.');return;}
+      try{processUpload(rawData,file.name);}catch(err){alert('Error processing data: '+err.message);console.error(err);}
     }catch(err){
       alert('Error reading file: '+err.message);
     }
@@ -1508,12 +1509,20 @@ function processUpload(rawData,filename){
   rawData.forEach(row=>{
     const d=row['DATE'];if(!d)return;
     const date=new Date(d);
+    if(isNaN(date.getTime()))return;
     const mo=months[date.getMonth()];
-    const v=row['VENUE NAME']||'';
-    const st=row['STATE']||'';
+    const v=(row['VENUE NAME']||'').toString();
+    const st=(row['STATE']||'').toString();
+    // Try multiple possible column names for robustness
     const units=parseInt(row['# TOTAL SALES'])||0;
     const rev=parseFloat(row['$ TOTAL SALES'])||0;
-    const sampled=parseInt(row['How many customers sampled to in total? ']||row['How many customers sampled to in total?'])||0;
+    const sampled=parseInt(
+      row['How many customers sampled to in total? ']||
+      row['How many customers sampled to in total?']||
+      row['TOTAL SAMPLED']||
+      row['How many customers sampled to?']||
+      row['How many customers sampled to? ']||0
+    )||0;
     const c=chainOf(v);
     
     if(!monthly[mo])monthly[mo]={ev:0,sa:0,un:0,sh:0};
